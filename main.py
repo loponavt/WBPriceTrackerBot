@@ -14,7 +14,7 @@ bot = Bot(os.getenv('TOKEN'))
 dp = Dispatcher(bot=bot)
 
 
-def get_item_data(article: str):
+async def get_item_data(article: str):
     headers = {'user-agent': UserAgent(use_external_data=True).chrome}
     response = requests.get(url=f'https://card.wb.ru/cards/detail'
                                 f'?spp=18&locale=ru&lang=ru&curr=rub'
@@ -49,20 +49,19 @@ def get_item_data(article: str):
 async def cmd_start(message: types.Message):
     await message.answer(f'Привет {message.from_user.first_name}\n'
                          f'Для отслеживания цены товара, пришли мне его артикул')
-    await db.add_user(message.from_user.id)
 
 @dp.message(F.text)
 async def message_handler(message: Message):
-    item_data = get_item_data(message.text)
+    item_data = await get_item_data(message.text)
     item_name = item_data['name']
     item_supplier = item_data['supplier']
     item_price = item_data['price']
     if item_data['name'] == '':
-        answer = 'Нет такого артикула'
+        answer = 'Не могу найти такой артикул'
     else:
         answer = f'{item_name}\n{item_supplier}\n{item_price} ₽'
     await message.answer(answer)
-    if answer != 'Нет такого артикула':
+    if answer != 'Не могу найти такой артикул':
         await db.add_article(message.from_user.id, message.text, item_price)
 
 async def main():
