@@ -2,7 +2,8 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters.command import Command
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardMarkup
+import database as db
 import requests
 from fake_useragent import UserAgent
 import os
@@ -10,31 +11,29 @@ from dotenv import load_dotenv
 
 load_dotenv()
 bot = Bot(os.getenv('TOKEN'))
-dp = Dispatcher()
+dp = Dispatcher(bot=bot)
 
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    await message.answer("Для отслеживания товара, пришлите мне ссылку на него, чел")
 
-def get_item_price(article: str)->str:
+def get_item_data(article: str):
     headers = {'user-agent': UserAgent(use_external_data=True).chrome}
     response = requests.get(url=f'https://card.wb.ru/cards/detail'
                                 f'?spp=18&locale=ru&lang=ru&curr=rub'
                                 f'&nm={article}', headers=headers)
-    answer = 'Нет такого артикула'
+    answer = {'name': '',
+              'supplier': '',
+              'price': 0
+    }
     try:
         response.raise_for_status()
         json_data = response.json().get('data')
         # print(json_data)
         if json_data:
-
             for product in json_data.get('products'):
-                name = product.get('name')
-                price = round(product.get('salePriceU')/100)
-                supplier = product.get('supplier')
+                answer['name'] = product.get('name')
+                answer['price'] = round(product.get('salePriceU')/100)
+                answer['supplier'] = product.get('supplier')
                 review_rating = product.get('reviewRating')
                 # TODO хорошо бы возвращать еще и картинку
-                answer = f'{name}\n{supplier}\n{price} ₽'
 
     except requests.exceptions.HTTPError:
         logging.warning(
@@ -43,15 +42,31 @@ def get_item_price(article: str)->str:
     except AttributeError as e:
         logging.error(
             'Ошибка при обработке данных '
-            f'для артикула {article}: {e}'
-        )
+            f'для артикула {article}: {e}')
     return answer
+
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    await message.answer(f'Привет {message.from_user.first_name}\n'
+                         f'Для отслеживания цены товара, пришли мне его артикул')
+    await db.add_user(message.from_user.id)
 
 @dp.message(F.text)
 async def message_handler(message: Message):
-    await message.answer(str(get_item_price(message.text)))
+    item_data = get_item_data(message.text)
+    item_name = item_data['name']
+    item_supplier = item_data['supplier']
+    item_price = item_data['price']
+    if item_data['name'] == '':
+        answer = 'Нет такого артикула'
+    else:
+        answer = f'{item_name}\n{item_supplier}\n{item_price} ₽'
+    await message.answer(answer)
+    if answer != 'Нет такого артикула':
+        await db.add_article(message.from_user.id, message.text, item_price)
 
 async def main():
+    await db.start_db()
     await dp.start_polling(bot)
 
 
