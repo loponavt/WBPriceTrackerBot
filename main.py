@@ -1,10 +1,15 @@
 import asyncio
 import logging
+from typing import Optional
+
 import requests
 
 from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters.callback_data import CallbackData
 from aiogram.filters.command import Command
 from aiogram.types import Message
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import database as db
@@ -50,13 +55,6 @@ async def cmd_start(message: types.Message):
     await message.answer(f'Привет {message.from_user.first_name}\n'
                          f'Для отслеживания цены товара, пришли мне его артикул')
 
-async def start_looper():
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(db.price_checker, trigger='interval', seconds=60)
-    scheduler.start()
-    file_logger.info('looper started')
-    console_logger.info('looper started')
-
 
 @dp.message(F.text)
 async def message_handler(message: Message):
@@ -68,17 +66,43 @@ async def message_handler(message: Message):
         answer = 'Не могу найти такой артикул'
         file_logger.info(f'{message.from_user.first_name} {message.from_user.last_name} '
                          f'@{message.from_user.username}: {message.text}')
+        await message.answer(answer)
     else:
-        answer = f'{item_name}\n{item_supplier}\n{item_price} ₽\nТовар добавлен'
-    await message.answer(answer)
-    if answer != 'Не могу найти такой артикул':
-        await db.add_article(message.from_user.id, message.text, item_price,
-                             message.from_user.first_name, message.from_user.last_name, message.from_user.username)
+        if await db.add_article(message.from_user.id, message.text, item_price,
+                             message.from_user.first_name, message.from_user.last_name, message.from_user.username):
+            answer = f'`{message.text}`\n{item_name}\n{item_supplier}\n{item_price} ₽\nТовар добавлен'
+            builder = InlineKeyboardBuilder()
+            builder.add(types.InlineKeyboardButton(
+                text="Удалить артикул",
+                callback_data=f"delete_item")
+            )
+            # await message.answer(answer, reply_markup=builder.as_markup(), parse_mode="MARKDOWN")
+            await message.answer(answer)
+        else:
+            answer = f'Этот артикул уже был добавлен'
+            await message.answer(answer)
 
+@dp.callback_query()
+async def callback_query_keyboard(callback: types.CallbackQuery):
+    answer = callback.message.text[:callback.message.text.find("\n")]
+    await db.remove_article(callback.from_user.id, answer)
+    await callback.message.answer(f'Артикул {answer} больше не отслеживается')
+    await callback.answer()
 
 async def write_to_user(chat_id, text: str):
-    await bot.send_message(chat_id, text, parse_mode="MARKDOWN")
+    builder = InlineKeyboardBuilder()
+    builder.add(types.InlineKeyboardButton(
+        text="Удалить артикул",
+        callback_data=f"delete_item")
+    )
+    await bot.send_message(chat_id, text, parse_mode="MARKDOWN", reply_markup=builder.as_markup())
 
+async def start_looper():
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(db.price_checker, trigger='interval', seconds=10)
+    scheduler.start()
+    file_logger.info('looper started')
+    console_logger.info('looper started')
 
 async def main():
     await asyncio.gather(db.start_db(),
