@@ -42,12 +42,15 @@ async def price_checker():
             answer = await main.get_item_data(article)
             item_name = answer['name']
             supplier = answer['supplier']
-            if price_in_table>answer['price']:
-                difference = price_in_table-answer['price']
+            price = answer['price']
+            if price == 0: # если какие-то проблемы и парсер не получил инфу с вб
+                continue
+            if price_in_table>price:
+                difference = price_in_table-price
                 percent = round(difference/price_in_table*100)
                 await main.write_to_user(tg_id, f"`{article}`\n{item_name}\n{supplier}\n"
-                                         f"{price_in_table} ---> {answer['price']}\n"
+                                         f"{price_in_table} ---> {price}\n"
                                          f"-{difference}₽ (-%{percent})")
                 cur.execute("UPDATE data SET price = ? WHERE article = ?",
-                            (answer['price'], article))
+                            (price, article))
                 db.commit()
