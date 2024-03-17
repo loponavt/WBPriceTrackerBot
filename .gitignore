@@ -7,3 +7,5 @@
 /.idea/vcs.xml
 /.idea/WBPriceTrackerBot.iml
 /telgb.db
+/log_dir/logi.log
+/tb.db

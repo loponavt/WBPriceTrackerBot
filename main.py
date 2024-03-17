@@ -2,29 +2,30 @@ import asyncio
 import logging
 
 import requests
-
+import os
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters.command import Command
 from aiogram.types import Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
-import database as db
-
 from fake_useragent import UserAgent
-import os
 from dotenv import load_dotenv
 
 load_dotenv()
-bot = Bot(os.getenv('TOKEN'))
-dp = Dispatcher(bot=bot)
+bot = Bot(os.getenv('WB_TOKEN'))
+working_dir = os.getenv('WB_WORKING_DIR')
+import database as db
+
 file_logger = logging.getLogger('file_logger')
 console_logger = logging.getLogger('console_logger')
 
+dp = Dispatcher(bot=bot)
+builder = InlineKeyboardBuilder()
+builder.add(types.InlineKeyboardButton(text='Перестать отслеживать', callback_data='delete_item'))
 
-async def get_item_data(article: str) ->  dict[str, str | int] | None:
+async def get_item_data(article: str) ->  dict[str, str | int]:
     """
-    Возвращает инфу по артикулу товара или None
+    Возвращает имя, цену и продавца по артикулу товара или None в если запрос не прошел
     :param article: артикул товара
     :return:
     """
@@ -45,7 +46,7 @@ async def get_item_data(article: str) ->  dict[str, str | int] | None:
         file_logger.error(f'Проблемы с получением данных: {ex}')
     return answer
 
-@dp.message(Command("start"))
+@dp.message(Command('start'))
 async def cmd_start(message: types.Message):
     await message.answer(f'Привет, {message.from_user.first_name}\n'
                          f'Для отслеживания цены товара, пришли мне его артикул')
@@ -65,31 +66,28 @@ async def message_handler(message: Message):
     else:
         if await db.add_article(message.from_user.id, message.text, item_price,
                              message.from_user.first_name, message.from_user.last_name, message.from_user.username):
-            builder = InlineKeyboardBuilder()
-            builder.add(types.InlineKeyboardButton(text="Перестать отслеживать", callback_data=f"delete_item"))
+
             await message.answer(f'`{message.text}`\n'
                                  f'{item_name}\n'
                                  f'{item_supplier}\n'
                                  f'{item_price} ₽\n'
-                                 f'Товар добавлен', parse_mode='MARKDOWN')
+                                 f'Товар добавлен', parse_mode='MARKDOWN', reply_markup=builder.as_markup())
         else:
             await message.answer('Этот артикул уже был добавлен')
 
 @dp.callback_query()
 async def callback_query_keyboard(callback: types.CallbackQuery):
-    article = callback.message.text[:callback.message.text.find("\n")]
+    article = callback.message.text[:callback.message.text.find('\n')]
     await db.remove_article(callback.from_user.id, article)
     await callback.message.answer(f'Артикул `{article}` больше не отслеживается', parse_mode='MARKDOWN')
     await callback.answer()
 
-async def write_to_user(chat_id, text: str):
-    builder = InlineKeyboardBuilder()
-    builder.add(types.InlineKeyboardButton(text="Перестать отслеживать", callback_data=f"delete_item"))
-    await bot.send_message(chat_id, text, parse_mode="MARKDOWN", reply_markup=builder.as_markup())
+async def write_to_user(chat_id: int, text: str):
+    await bot.send_message(chat_id, text, parse_mode='MARKDOWN', reply_markup=builder.as_markup())
 
 async def start_looper():
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(db.price_checker, trigger='interval', seconds=60)
+    scheduler.add_job(db.check_price, trigger='interval', seconds=60)
     scheduler.start()
     file_logger.info('looper started')
     console_logger.info('looper started')
@@ -109,11 +107,11 @@ if __name__ == '__main__':
     sh.setFormatter(formatter)
     console_logger.addHandler(sh)
 
-    if not os.path.isdir('log_dir'):
-        os.makedirs('log_dir')
+    if not os.path.isdir(f'{working_dir}/log_dir'):
+        os.makedirs(f'{working_dir}/log_dir')
         console_logger.info('create log_dir')
 
-    fh = logging.FileHandler('log_dir/logi.log')
+    fh = logging.FileHandler(f'{working_dir}/log_dir/logi.log')
     fh.setFormatter(formatter)
     file_logger.addHandler(fh)
 
